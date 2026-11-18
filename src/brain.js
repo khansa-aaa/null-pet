@@ -8,6 +8,7 @@ const snapshot = require('./snapshot');
 const planner = require('./planner');
 const summary = require('./summary');
 const roster = require('./roster');
+const abilities = require('./abilities');
 const usage = require('./usage');
 const { riskOf } = require('./risk');
 const { log } = require('./log');
@@ -137,8 +138,8 @@ class Brain extends EventEmitter {
       const sessions = this.workable(pid);
       const snap = await snapshot.build(p, sessions);
       const s = settings.read();
-      const { rec, session } = await planner.recommend(p, snap, sessions, { reason, usage: usage.summary(), maxBusy: s.max_busy_per_project });
-      await this.accept(p, rec, session, { reason });
+      const { rec, session, denials } = await planner.recommend(p, snap, sessions, { reason, usage: usage.summary(), maxBusy: s.max_busy_per_project });
+      await this.accept(p, rec, session, { reason, denials });
     } catch (e) {
       log('plan failed', pid, e.message);
       this.errors.set(pid, e.message);
@@ -187,7 +188,9 @@ class Brain extends EventEmitter {
     return recent.length < AUTO_PER_HOUR;
   }
 
-  async accept(p, rec, plannerSession, { reason, chat = [] }) {
+  async accept(p, rec, plannerSession, { reason, chat = [], denials = [] }) {
+    const requests = abilities.requestsFrom(denials);
+    if (requests.length) log('abilities requested', p.id, requests.map((r) => r.rule).join(', '));
     if (rec.memory_update) memory.writeMemory(p.id, rec.memory_update);
     if (Array.isArray(rec.needs_you)) this.needs.set(p.id, rec.needs_you.filter((n) => n && n.ask));
     const actions = this.normalize(p, rec);
@@ -201,7 +204,7 @@ class Brain extends EventEmitter {
         await this.run(p, safe, { auto: true });
       }
     }
-    if (!pending.length && !rec.reply && !(this.needs.get(p.id) || []).length) {
+    if (!pending.length && !rec.reply && !requests.length && !(this.needs.get(p.id) || []).length) {
       this.cards.delete(p.id);
       if (!actions.length) this.emit('toast', { project: p.id, text: `${p.name}: ${rec.status || 'nothing to do right now.'}` });
       return;
@@ -215,6 +218,7 @@ class Brain extends EventEmitter {
       actions: pending,
       plannerSession,
       chat: rec.reply ? [...chat, { from: 'null', text: rec.reply }] : chat,
+      requests, // abilities the planner was refused: Allow always / Not now
       createdAt: Date.now(),
       busy: false
     };
@@ -326,9 +330,9 @@ class Brain extends EventEmitter {
     this.emitState();
     try {
       const idle = this.workable(p.id).filter((s) => s.status === 'idle').map((s) => s.name);
-      const { rec, session } = await planner.followUp(p, card.plannerSession, text, { idle, maxBusy: settings.read().max_busy_per_project });
+      const { rec, session, denials } = await planner.followUp(p, card.plannerSession, text, { idle, maxBusy: settings.read().max_busy_per_project });
       this.cards.delete(p.id);
-      await this.accept(p, rec, session, { reason: card.reason, chat: card.chat });
+      await this.accept(p, rec, session, { reason: card.reason, chat: card.chat, denials });
     } catch (e) {
       card.busy = false;
       card.chat = [...card.chat, { from: 'null', text: `Something went wrong: ${e.message}` }];
@@ -378,6 +382,23 @@ class Brain extends EventEmitter {
     } catch (e) {
       return { ok: false, text: `Couldn't reopen ${c.name}: ${e.message}` };
     }
+  }
+
+  // An ability the planner asked for. Allow always saves the rule for every future run; once every
+  // request on the card is answered and something was allowed, the planner tries again with it.
+  async answerAbility(cardId, rule, allow) {
+    const card = [...this.cards.values()].find((c) => c.id === cardId);
+    if (!card || card.busy) return;
+    const req = (card.requests || []).find((r) => r.rule === rule);
+    if (!req) return;
+    card.requests = card.requests.filter((r) => r !== req);
+    card.allowedNow = [...(card.allowedNow || []), ...(allow ? [req] : [])];
+    if (allow) abilities.grant(rule);
+    memory.addHistory(card.project, { event: allow ? 'ability-allowed' : 'ability-declined', title: req.label, note: rule });
+    if (card.requests.length || !card.allowedNow.length) return this.emitState();
+    const names = card.allowedNow.map((r) => r.label).join(', ');
+    card.allowedNow = [];
+    await this.converse(card, `The user allowed: ${names}. Use it now to do what you couldn't before, then answer again with the updated card.`, { from: 'you', text: `Allowed: ${names}` });
   }
 
   pauseSession(projectId, sessionId, paused) {

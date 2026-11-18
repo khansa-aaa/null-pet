@@ -125,3 +125,18 @@ textarea:focus { border-color: var(--red); }
 .roster-wrap summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
 .sessions { grid-template-columns: minmax(0, 1fr); }
 #expand { font-size: 16px; }
+
+/* Markdown in null's text */
+.md ul, .md ol { margin: 2px 0; padding-left: 18px; }
+.md li { margin: 1px 0; }
+.md code, .asks code, .ww code { font: 11.5px var(--mono); background: var(--line); border-radius: 4px; padding: 0 4px; }
+.md .md-h { font-weight: 650; margin-top: 4px; }
+.md .md-gap { height: 6px; }
+.msg.md { white-space: normal; }
+/* ability requests */
+.asks { border: 1px solid rgba(255, 65, 54, .45); background: var(--red-soft); border-radius: 10px; padding: 6px 10px 8px; }
+.asks ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
+.asks li { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; }
+.asks .who { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mini.allow { background: var(--red); border-color: var(--red); color: var(--red-ink); }
+.mini.allow:hover:not(:disabled) { color: var(--red-ink); filter: brightness(1.1); }

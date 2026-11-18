@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const settings = require('./src/settings');
 const usage = require('./src/usage');
+const abilities = require('./src/abilities');
 const { SessionWatcher } = require('./src/sessions');
 const { Brain } = require('./src/brain');
 const { dispatch, closeSession, reopenSession } = require('./src/dispatch');
@@ -182,6 +183,12 @@ function menuTemplate() {
         { label: 'Add project folder…', click: addProject }
       ]
     },
+    {
+      label: 'Abilities you allowed',
+      submenu: abilities.granted().length
+        ? abilities.granted().map((r) => ({ label: `${abilities.label(r)}  (${r})`, type: 'checkbox', checked: true, click: () => (abilities.revoke(r), refreshTray()) }))
+        : [{ label: 'None yet: null asks on the card when it needs one', enabled: false }]
+    },
     { type: 'separator' },
     { label: 'Start null at login', type: 'checkbox', checked: launchAtLogin(), click: (i) => setLaunchAtLogin(i.checked) },
     { label: 'Open memory folder', click: () => shell.openPath(DATA_DIR) },
@@ -275,6 +282,7 @@ ipcMain.handle('null:dismiss', (_e, cardId) => brain.dismiss(cardId));
 ipcMain.handle('null:recommend', (_e, pid) => brain.trigger(pid, 'The user asked for a recommendation'));
 ipcMain.handle('null:addProject', () => addProject());
 ipcMain.handle('null:closeSession', (_e, pid) => brain.closeSession(pid));
+ipcMain.handle('null:ability', (_e, cardId, rule, allow) => brain.answerAbility(cardId, rule, !!allow));
 ipcMain.handle('null:openSession', (_e, pid, sessionId) => brain.openSession(pid, sessionId));
 ipcMain.handle('null:pauseSession', (_e, pid, sessionId, paused) => brain.pauseSession(pid, sessionId, paused));
 ipcMain.on('drag:start', () => {
@@ -383,7 +391,11 @@ async function snapshotWindows(dir) {
       }
     ],
     plannerSession: 'x',
-    chat: [],
+    chat: [
+      { from: 'you', text: 'Is the new pricing page live?' },
+      { from: 'null', text: "**What goes live:** the cart redesign and the `/pricing` page.\n- Merged on main: yes\n- Served by the live site: couldn't check the response headers without `curl`" }
+    ],
+    requests: [{ rule: 'Bash(curl:*)', label: 'Run `curl` commands', detail: 'curl -sI https://shop.example/pricing', tool: 'Bash' }],
     createdAt: Date.now(),
     busy: false
   });

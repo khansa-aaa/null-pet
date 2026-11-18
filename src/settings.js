@@ -13,6 +13,7 @@ const DEFAULTS = {
   week_cap: 0.95, // auto mode stops dispatching once the 7-day window passes this utilization
   courier_permission_mode: 'auto', // the permission mode your own sessions run in; a mismatch makes them hold null's messages for approval
   card_large: false, // the card's expand button
+  abilities_granted: [], // tool rules you allowed for null's planner on top of src/abilities.js DEFAULTS
   anchor: null
 };
 

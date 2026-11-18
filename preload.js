@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('nullPet', {
   recommend: (pid) => ipcRenderer.invoke('null:recommend', pid),
   addProject: () => ipcRenderer.invoke('null:addProject'),
   closeSession: (pid) => ipcRenderer.invoke('null:closeSession', pid),
+  ability: (cardId, rule, allow) => ipcRenderer.invoke('null:ability', cardId, rule, allow),
   openSession: (projectId, sessionId) => ipcRenderer.invoke('null:openSession', projectId, sessionId),
   pauseSession: (projectId, sessionId, paused) => ipcRenderer.invoke('null:pauseSession', projectId, sessionId, paused),
   dragStart: () => ipcRenderer.send('drag:start'),

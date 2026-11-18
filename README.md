@@ -40,7 +40,7 @@ flowchart LR
 
 null runs Claude Code itself for two small jobs, both under your own login:
 
-- **The planner** is a headless `claude -p` run limited to read-only tools (`Read`, `Grep`, `Glob` and a few `git` commands). It cannot edit anything.
+- **The planner** is a headless `claude -p` run that may only use the tools on its abilities list: reading files, a few `git` commands, fetching and searching the web, plus anything you allow later (see [Abilities](#abilities)). Everything else is refused.
 - **The courier** is a short headless run that can only list sessions and send a message. It delivers an approved prompt to an idle session, which runs it as a normal turn.
 
 Your Claude Code settings, plugins and hooks apply to these runs and to the sessions null starts, the same as to your own.
@@ -154,6 +154,17 @@ Sessions often finish a task by asking you for something: a login, a decision, a
 
 Each project has its own summary. It covers everything since your last `/summary` (the first one covers the past day): commits, uncommitted files, what each session did (including sessions you have since closed), and what null sent or you rejected. The answer is three short lists: **Done**, **In progress** and **Needs you**.
 
+### Abilities
+
+null's own planning runs (not your sessions) can read the project and its git history, fetch web pages and search the web from the start. If a plan needs something more, say running `curl` or an MCP tool, the run is refused that tool and the card asks you:
+
+| Button | What it does |
+| --- | --- |
+| **Allow always** | Saves the ability, so every later plan uses it without asking. null then re-runs the plan with it |
+| **Not now** | Leaves it off; null notes that you declined |
+
+Abilities you allowed are listed in the menu under **Abilities you allowed**; untick one to take it back. The browser isn't offered: browser tools hang in background runs, so anything that needs a browser (logged-in pages, clicking through a site) is proposed as work for one of your sessions instead.
+
 ### What counts as risky
 
 null asks before any action that mentions production, deploys, migrations, access rules, secrets, releases, deleting data, `git push`, force-pushes, `rm -rf`, payments, or sending emails and messages. The planner can also flag an action itself. The check is a word list in [`src/risk.js`](src/risk.js), so read the prompt before you approve: it is a safety net, not a guarantee.
@@ -252,6 +263,7 @@ npm test    # unit tests (node --test)
 | `src/brain.js` | The loop: idle, plan, card or auto-send |
 | `src/dispatch.js` | The courier, and opening new Terminal sessions |
 | `src/risk.js` | Which actions always ask |
+| `src/abilities.js` | What the planner may use, and turning refusals into requests |
 | `src/memory.js` | Per-project memory and history |
 | `src/summary.js` | `/summary` |
 | `src/roster.js` | Open and closed sessions, their purposes, pausing |

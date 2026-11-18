@@ -5,6 +5,7 @@
 // Its model comes from your Claude Code settings, like any other session (user settings are loaded).
 const { claude, structured } = require('./claude');
 const memory = require('./memory');
+const abilities = require('./abilities');
 
 const ACTION = {
   type: 'object',
@@ -77,7 +78,10 @@ How to recommend:
 - Spread independent work across idle sessions in parallel. Never duplicate what a busy session is doing.
 - Never re-propose something the user rejected (see memory and history) unless the user brings it back.
 - Mark risky: production, deploys, migrations, RLS/policies, releases/store submissions, deleting data or files, git push, sending emails/outreach/messages, payments, secrets, anything outward-facing or hard to undo.
-- Check facts with Read/Grep/git if needed, but keep it short (at most ~8 tool calls). You cannot edit anything.
+- Check facts with whatever you need (files, git, WebFetch, WebSearch), but keep it short (about 8-12 tool calls). Don't change anything yourself: the sessions do the work.
+- You can't use the browser. Anything that needs it (logged-in pages, dashboards, clicking through a site) is work for a session: propose it as an action.
+- Some tools may be refused because the user hasn't allowed them yet. When one is, don't guess around it: say plainly what you couldn't check and which ability would settle it. null asks the user, and if they allow it, you are run again with it.
+- Your text is shown as Markdown (**bold**, \`code\`, "- " lists). Keep it short.
 - "what" and "why" are what the user reads to decide, so make them clear and short: bullets, one fact each, at most 12 words, no filler, no repeating the title. The detail belongs in the prompt.
 - needs_you: list every open ask from the sessions' last replies (logins, decisions, answers, purchases, approvals), each once, most blocking first. Never bury these in status. A session whose last reply asks the user something gets no new work that depends on that answer.
 - Never plan around a missing login or decision by quietly narrowing the work: list it in needs_you, then propose only work that truly doesn't need it.
@@ -87,17 +91,14 @@ How to recommend:
 memory_update: rewrite memory.md (under 4000 characters) only when you learned something durable: goals, current milestone, decisions, the user's preferences, rejected ideas with reasons. Otherwise empty.`;
 }
 
-const TOOLS = ['--tools', 'Read', 'Grep', 'Glob', 'Bash'];
-const ALLOWED = ['--allowedTools', 'Read', 'Grep', 'Glob', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git show:*)', 'Bash(git branch:*)', 'Bash(ls:*)'];
-
 function baseArgs(project, maxBusy) {
   return [
     '--name',
     `null-planner-${project.id}`,
     '--permission-mode',
-    'default', // anything not allowed above is denied, never run
-    ...TOOLS,
-    ...ALLOWED,
+    'default', // anything not on the abilities list is refused (and reported), never run
+    '--allowedTools',
+    ...abilities.allowed(),
     '--add-dir',
     project.root,
     '--append-system-prompt',
@@ -149,7 +150,7 @@ Recommend the next set of actions.`;
 
 async function recommend(project, snap, sessions, opts) {
   const result = await claude(baseArgs(project, opts.maxBusy), input(project, snap, sessions, opts), { cwd: memory.workspace(project.id), timeout: 8 * 60 * 1000 });
-  return { rec: structured(result), session: result.session_id };
+  return { rec: structured(result), session: result.session_id, denials: result.permission_denials || [] };
 }
 
 // Chat or a rejection: continue that card's planner conversation.
@@ -159,7 +160,7 @@ async function followUp(project, plannerSession, text, opts) {
     cwd: memory.workspace(project.id),
     timeout: 8 * 60 * 1000
   });
-  return { rec: structured(result), session: result.session_id };
+  return { rec: structured(result), session: result.session_id, denials: result.permission_denials || [] };
 }
 
 module.exports = { recommend, followUp, SCHEMA, system, input };

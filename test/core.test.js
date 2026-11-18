@@ -344,3 +344,50 @@ test('paused sessions get no work; a busy session is never closed; open asks are
   const { SCHEMA } = require('../src/planner');
   assert.ok(SCHEMA.required.includes('needs_you'));
 });
+
+test('abilities: refused tools become requests with a rule; allowing one saves it for later runs', () => {
+  const abilities = require('../src/abilities');
+  assert.ok(abilities.allowed().includes('WebFetch'), 'the web is on from the start');
+  assert.ok(abilities.allowed().includes('WebSearch'));
+  assert.equal(abilities.requestsFrom([{ tool_name: 'mcp__playwright__browser_navigate', tool_input: { url: 'https://x.test' } }]).length, 0, 'browser tools hang headless: never offered');
+  assert.ok(!abilities.allowed().includes('Edit'));
+  assert.equal(abilities.ruleFor('Bash', { command: 'git push origin main' }).rule, 'Bash(git push:*)');
+  assert.equal(abilities.ruleFor('Bash', { command: 'FOO=1 curl -s https://x.test' }).rule, 'Bash(curl:*)');
+  const reqs = abilities.requestsFrom([
+    { tool_name: 'WebFetch', tool_input: { url: 'https://x.test' } }, // already allowed: no request
+    { tool_name: 'mcp__playwright__browser_click', tool_input: { element: 'Sign in' } },
+    { tool_name: 'mcp__playwright__browser_click', tool_input: { element: 'Next' } }, // same rule: once
+    { tool_name: 'Bash', tool_input: { command: 'curl -sI https://x.test' } }
+  ]);
+  assert.deepEqual(reqs.map((r) => r.rule), ['Bash(curl:*)']);
+  assert.equal(reqs[0].label, 'Run `curl` commands');
+  abilities.grant('Bash(curl:*)');
+  assert.ok(abilities.allowed().includes('Bash(curl:*)'));
+  assert.equal(abilities.requestsFrom([{ tool_name: 'Bash', tool_input: { command: 'curl x' } }]).length, 0);
+  abilities.revoke('Bash(curl:*)');
+  assert.ok(!abilities.allowed().includes('Bash(curl:*)'));
+});
+
+test('a refused tool puts a request on the card; allowing it re-runs the planner with it', async () => {
+  const abilities = require('../src/abilities');
+  const planner = require('../src/planner');
+  const fake = new (require('events'))();
+  fake.list = () => ({ 'shop-app': [], 'docs-site': [] });
+  const brain = new Brain(fake, async () => []);
+  const p = settings.project('shop-app');
+  await brain.accept(p, { status: 's', reply: 'I could not load the site.', needs_you: [], actions: [], memory_update: '' }, 'sess', {
+    reason: 'r',
+    denials: [{ tool_name: 'mcp__replicate__create_predictions', tool_input: { model: 'x' } }]
+  });
+  const card = brain.cards.get('shop-app');
+  assert.equal(card.requests[0].rule, 'mcp__replicate__create_predictions');
+  const real = planner.followUp;
+  let asked = '';
+  planner.followUp = async (_p, _s, text) => ((asked = text), { rec: { status: 'ok', reply: 'Loaded it.', needs_you: [], actions: [], memory_update: '' }, session: 'sess2', denials: [] });
+  await brain.answerAbility(card.id, 'mcp__replicate__create_predictions', true);
+  planner.followUp = real;
+  assert.match(asked, /allowed: replicate: create predictions/i);
+  assert.ok(abilities.allowed().includes('mcp__replicate__create_predictions'));
+  assert.deepEqual(brain.cards.get('shop-app').chat.map((m) => m.text).slice(-1), ['Loaded it.']);
+  abilities.revoke('mcp__replicate__create_predictions');
+});

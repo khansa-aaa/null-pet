@@ -86,6 +86,43 @@ let anyBusy = false;
 const checked = new Map(); // card id -> Set of action ids left ticked
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+// A small, safe Markdown subset for what Claude writes: **bold**, *italic*, `code`, headings,
+// "- " / "• " / "1." lists. The text is escaped first, so only these tags can appear.
+const inlineMd = (s) =>
+  esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,:;!?]|$)/g, '$1<em>$2</em>');
+function md(text) {
+  let html = '';
+  let list = null;
+  const close = () => {
+    if (list) html += `</${list}>`;
+    list = null;
+  };
+  for (const line of String(text ?? '').replace(/\r/g, '').split('\n')) {
+    const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
+    const num = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const head = /^\s*#{1,6}\s+(.*)$/.exec(line);
+    if (bullet || num) {
+      const kind = bullet ? 'ul' : 'ol';
+      if (list !== kind) {
+        close();
+        html += `<${kind}>`;
+        list = kind;
+      }
+      html += `<li>${inlineMd((bullet || num)[1])}</li>`;
+      continue;
+    }
+    close();
+    if (head) html += `<div class="md-h">${inlineMd(head[1])}</div>`;
+    else if (!line.trim()) html += '<div class="md-gap"></div>';
+    else html += `<div>${inlineMd(line)}</div>`;
+  }
+  close();
+  return html;
+}
 const cardFor = (pid) => state.cards.find((c) => c.project === pid) || null;
 
 function render() {
@@ -183,7 +220,7 @@ function needsHtml(p) {
   return `<div class="needs"><div class="sec warn">Needs you (${list.length})</div><ul>${list
     .map(
       (n) =>
-        `<li><span class="kind">${esc(icon[n.kind] || 'Do')}</span><div><div>${esc(n.ask)}</div><div class="purpose">${n.session ? `${esc(n.session)} · ` : ''}blocks: ${esc(n.blocks || '')}</div></div></li>`
+        `<li><span class="kind">${esc(icon[n.kind] || 'Do')}</span><div><div>${inlineMd(n.ask)}</div><div class="purpose">${n.session ? `${esc(n.session)} · ` : ''}blocks: ${esc(n.blocks || '')}</div></div></li>`
     )
     .join('')}</ul></div>`;
 }
@@ -202,15 +239,27 @@ function overviewHtml(p) {
 function bullets(label, list) {
   const items = (Array.isArray(list) ? list : list ? [list] : []).filter(Boolean);
   if (!items.length) return '';
-  return `<div class="ww"><span class="ww-label">${label}</span><ul>${items.map((b) => `<li>${esc(b)}</li>`).join('')}</ul></div>`;
+  return `<div class="ww"><span class="ww-label">${label}</span><ul>${items.map((b) => `<li>${inlineMd(b)}</li>`).join('')}</ul></div>`;
 }
 
 function notesHtml(p) {
   const notes = p.notes || [];
   if (!notes.length && !p.summarizing) return '';
-  return `<div class="chat">${notes.map((m) => `<div class="msg ${m.from === 'you' ? 'you' : 'null'}${m.kind === 'summary' ? ' summary' : ''}">${esc(m.text)}</div>`).join('')}${
+  return `<div class="chat">${notes.map((m) => `<div class="msg ${m.from === 'you' ? 'you' : 'null'}${m.kind === 'summary' ? ' summary' : ''}${m.from === 'you' ? '' : ' md'}">${m.from === 'you' ? esc(m.text) : md(m.text)}</div>`).join('')}${
     p.summarizing ? '<div class="thinking">summarizing…</div>' : ''
   }</div>`;
+}
+
+// Abilities null's planner was refused: allow once and for all, or not now.
+function requestsHtml(card) {
+  const list = card.requests || [];
+  if (!list.length) return '';
+  return `<div class="asks"><div class="sec">null needs an ability (${list.length})</div><ul>${list
+    .map(
+      (r) =>
+        `<li><div class="who"><div><strong>${inlineMd(r.label)}</strong></div>${r.detail ? `<div class="purpose">${esc(r.detail)}</div>` : ''}<div class="purpose"><code>${esc(r.rule)}</code></div></div><div class="ctl"><button class="mini" data-ability="${esc(r.rule)}" data-allow="0" ${card.busy ? 'disabled' : ''}>Not now</button><button class="mini allow" data-ability="${esc(r.rule)}" data-allow="1" ${card.busy ? 'disabled' : ''} title="Allow it for null's planning from now on (undo in the menu: Abilities you allowed)">Allow always</button></div></li>`
+    )
+    .join('')}</ul></div>`;
 }
 
 function cardHtml(card, p) {
@@ -229,9 +278,10 @@ function cardHtml(card, p) {
       </li>`;
     })
     .join('');
-  const chat = card.chat.length ? `<div class="chat">${card.chat.map((m) => `<div class="msg ${m.from === 'you' ? 'you' : 'null'}">${esc(m.text)}</div>`).join('')}</div>` : '';
+  const chat = card.chat.length ? `<div class="chat">${card.chat.map((m) => `<div class="msg ${m.from === 'you' ? 'you' : 'null md'}">${m.from === 'you' ? esc(m.text) : md(m.text)}</div>`).join('')}</div>` : '';
   return `
-    <div class="status">${esc(card.status)}</div>
+    <div class="status md">${md(card.status)}</div>
+    ${requestsHtml(card)}
     <div class="reason">${esc(card.reason || '')}</div>
     ${needsHtml(p)}
     ${card.actions.length ? `<ul class="actions">${actions}</ul>` : '<p class="empty">No actions proposed.</p>'}
@@ -316,6 +366,11 @@ $('body').addEventListener('click', (e) => {
   if (c) return api.closeSession(Number(c.dataset.close)).then(say);
   const o = e.target.closest('[data-open]');
   if (o) return api.openSession(selected, o.dataset.open).then(say);
+  const ab = e.target.closest('[data-ability]');
+  if (ab) {
+    const card = cardFor(selected);
+    return card && api.ability(card.id, ab.dataset.ability, ab.dataset.allow === '1');
+  }
   const pz = e.target.closest('[data-pause]');
   if (pz) return api.pauseSession(selected, pz.dataset.pause, pz.dataset.paused !== '1').then(say);
   const r = e.target.closest('[data-recommend]');
