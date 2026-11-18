@@ -43,10 +43,26 @@ const SCHEMA = {
   properties: {
     status: { type: 'string', description: 'Where the project stands, in one sentence of at most 20 words.' },
     reply: { type: 'string', description: "Your answer to the user's chat message, or empty when there was none." },
+    needs_you: {
+      type: 'array',
+      maxItems: 6,
+      description: 'Everything still waiting on the user that only they can do: logins, decisions, answers to questions, purchases, approvals. Read every session\'s last reply for these. Empty when nothing is waiting.',
+      items: {
+        type: 'object',
+        properties: {
+          ask: { type: 'string', description: 'What the user has to do, at most 16 words, concrete (e.g. "Log in to Vercel in the Chrome window, or run ! vercel login").' },
+          session: { type: 'string', description: 'The session waiting on it (exact name), or empty when it is project-wide.' },
+          kind: { type: 'string', enum: ['login', 'decision', 'answer', 'purchase', 'approval', 'other'] },
+          blocks: { type: 'string', description: 'What stays stuck until it is done, at most 12 words.' }
+        },
+        required: ['ask', 'session', 'kind', 'blocks'],
+        additionalProperties: false
+      }
+    },
     actions: { type: 'array', items: ACTION, maxItems: 3 },
     memory_update: { type: 'string', description: 'The full new memory.md for this project when something durable changed, or empty to keep it.' }
   },
-  required: ['status', 'reply', 'actions', 'memory_update'],
+  required: ['status', 'reply', 'needs_you', 'actions', 'memory_update'],
   additionalProperties: false
 };
 
@@ -63,6 +79,8 @@ How to recommend:
 - Mark risky: production, deploys, migrations, RLS/policies, releases/store submissions, deleting data or files, git push, sending emails/outreach/messages, payments, secrets, anything outward-facing or hard to undo.
 - Check facts with Read/Grep/git if needed, but keep it short (at most ~8 tool calls). You cannot edit anything.
 - "what" and "why" are what the user reads to decide, so make them clear and short: bullets, one fact each, at most 12 words, no filler, no repeating the title. The detail belongs in the prompt.
+- needs_you: list every open ask from the sessions' last replies (logins, decisions, answers, purchases, approvals), each once, most blocking first. Never bury these in status. A session whose last reply asks the user something gets no new work that depends on that answer.
+- Never plan around a missing login or decision by quietly narrowing the work: list it in needs_you, then propose only work that truly doesn't need it.
 - If nothing is worth doing, return no actions and say why in status.
 - This is the only project you know about. Never mention or plan for any other project.
 
@@ -105,12 +123,13 @@ function usageLine(u) {
 }
 
 function input(project, snap, sessions, { reason, usage, maxBusy }) {
-  const idle = sessions.filter((s) => s.status === 'idle').map((s) => s.name);
-  const busy = sessions.filter((s) => s.status === 'busy').map((s) => s.name);
+  const label = (s) => `\n  - ${s.name}${s.purpose ? `: ${s.purpose}` : ''}`;
+  const idle = sessions.filter((s) => s.status === 'idle').map(label);
+  const busy = sessions.filter((s) => s.status !== 'idle').map(label);
   return `Why you're being asked: ${reason}
 ${usageLine(usage)}
-Idle sessions you can use: ${idle.length ? idle.join(', ') : '(none)'}
-Busy sessions (leave alone): ${busy.length ? busy.join(', ') : '(none)'}
+Idle sessions you can use (exact name, then its main job):${idle.length ? idle.join('') : ' (none)'}
+Busy sessions (leave alone):${busy.length ? busy.join('') : ' (none)'}
 New sessions allowed: ${Math.max(0, maxBusy - busy.length - idle.length)} (only if no idle session fits)
 
 <memory>

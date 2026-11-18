@@ -93,7 +93,63 @@ async function openSession(project, action) {
   const file = path.join(dir, `${Date.now()}.txt`);
   fs.writeFileSync(file, action.prompt);
   const name = newName(project);
-  const cmd = `cd ${shq(project.root)} && claude -n ${shq(name)} "$(cat ${shq(file)})"`;
+  const where = await openInTerminal(`cd ${shq(project.root)} && claude -n ${shq(name)} "$(cat ${shq(file)})"`);
+  return { name, where };
+}
+
+// Reopens a closed session where it ran, with its history (`claude --resume`).
+async function reopenSession(closed) {
+  if (!/^[0-9a-f-]{8,}$/i.test(closed.sessionId || '')) throw new Error('not a session id');
+  const name = closed.name ? ` -n ${shq(closed.name)}` : '';
+  const where = await openInTerminal(`cd ${shq(closed.cwd)} && claude --resume ${shq(closed.sessionId)}${name}`);
+  return { name: closed.name, where };
+}
+
+const sh = (file, args) =>
+  new Promise((resolve) => execFile(file, args, { timeout: 5000 }, (e, out) => resolve(e ? '' : String(out).trim())));
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+};
+
+// Ends an idle session: its claude process exits (the transcript is already on disk, so it can be
+// reopened), then its Terminal tab is closed if nothing else is running in it.
+async function closeSession(session) {
+  const pid = Number(session.pid);
+  if (!Number.isInteger(pid) || pid <= 1) throw new Error('no such session');
+  const comm = await sh('/bin/ps', ['-o', 'comm=', '-p', String(pid)]);
+  if (!/claude/i.test(comm)) throw new Error('that process is not Claude Code');
+  const tty = await sh('/bin/ps', ['-o', 'tty=', '-p', String(pid)]);
+  process.kill(pid, 'SIGTERM');
+  for (let i = 0; i < 25 && alive(pid); i++) await new Promise((r) => setTimeout(r, 200));
+  if (alive(pid)) throw new Error('it did not exit; close it in Terminal');
+  if (!/^ttys\d+$/.test(tty)) return { tab: false };
+  // Only a tab that has nothing running but its shell, so a tab in use is never touched. The shell
+  // exits, and Terminal closes the tab if its profile closes on a clean exit (the default).
+  const r = await osa(`tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "/dev/${tty}" then
+        if busy of t is false then
+          do script "exit" in t
+          return "closed"
+        end if
+        return "busy"
+      end if
+    end repeat
+  end repeat
+  return "none"
+end tell`).catch(() => 'none');
+  return { tab: r === 'closed' };
+}
+
+// Runs a shell command in a new Terminal tab, or a new window when a tab can't be made safely.
+async function openInTerminal(cmd) {
   // A new tab in the front Terminal window (Cmd-T needs Accessibility for System Events). The command
   // is only typed into that tab if we can prove it's the fresh one: the window gained a tab and the
   // selected tab isn't running anything. Otherwise it goes to a brand-new window, so it can never
@@ -117,7 +173,7 @@ async function openSession(project, action) {
   do script ${asq(cmd)}
   return "window"
 end tell`);
-  return { name, where: result === 'tab' ? 'a new Terminal tab' : 'a new Terminal window' };
+  return result === 'tab' ? 'a new Terminal tab' : 'a new Terminal window';
 }
 
 // Dispatches a set of actions. Returns [{ action, ok, target, detail }].
@@ -148,4 +204,4 @@ async function dispatch(project, actions, { auto = false } = {}) {
   return out;
 }
 
-module.exports = { dispatch, courier, openSession, envelope };
+module.exports = { dispatch, courier, openSession, reopenSession, closeSession, openInTerminal, envelope };

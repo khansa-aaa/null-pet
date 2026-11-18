@@ -6,7 +6,7 @@ const settings = require('./src/settings');
 const usage = require('./src/usage');
 const { SessionWatcher } = require('./src/sessions');
 const { Brain } = require('./src/brain');
-const { dispatch } = require('./src/dispatch');
+const { dispatch, closeSession, reopenSession } = require('./src/dispatch');
 const { lookIndex } = require('./src/look');
 const { DATA_DIR, LAUNCH_AGENT, LOG_FILE } = require('./src/paths');
 const { log } = require('./src/log');
@@ -36,7 +36,7 @@ function asset(names) {
 }
 
 const watcher = new SessionWatcher(() => settings.read().projects);
-const brain = new Brain(watcher, dispatch);
+const brain = new Brain(watcher, dispatch, { closer: closeSession, opener: reopenSession });
 
 const send = (channel, payload) => pet && !pet.isDestroyed() && pet.webContents.send(channel, payload);
 const pushState = () => send('null:state', brain.state());
@@ -264,6 +264,9 @@ ipcMain.handle('null:say', (_e, pid, text) => brain.say(pid, text));
 ipcMain.handle('null:dismiss', (_e, cardId) => brain.dismiss(cardId));
 ipcMain.handle('null:recommend', (_e, pid) => brain.trigger(pid, 'The user asked for a recommendation'));
 ipcMain.handle('null:addProject', () => addProject());
+ipcMain.handle('null:closeSession', (_e, pid) => brain.closeSession(pid));
+ipcMain.handle('null:openSession', (_e, pid, sessionId) => brain.openSession(pid, sessionId));
+ipcMain.handle('null:pauseSession', (_e, pid, sessionId, paused) => brain.pauseSession(pid, sessionId, paused));
 ipcMain.on('drag:start', () => {
   if (!pet) return;
   const [x, y] = pet.getPosition();
@@ -374,6 +377,27 @@ async function snapshotWindows(dir) {
     createdAt: Date.now(),
     busy: false
   });
+  const purposes = {
+    'checkout-tests': 'Checkout tests and payment bugs',
+    'cart-redesign': 'New cart screens and their states',
+    'api-rate-limits': 'API rate limiting and retry rules',
+    'search-index': 'Docs search index and ranking',
+    'broken-links': 'Link checker and redirect fixes'
+  };
+  brain.rosterView = (p, live) => ({
+    open: live.map((s) => ({ ...s, sessionId: `demo-${s.pid}`, paused: s.name === 'api-rate-limits', purpose: purposes[s.name] })),
+    closed:
+      p.id === 'shop-app'
+        ? [
+            { sessionId: 'demo-c1', name: 'release-notes', purpose: 'Changelog and release notes for 2.4', lastActive: Date.now() - 3 * 3600 * 1000 },
+            { sessionId: 'demo-c2', name: 'stripe-webhooks', purpose: 'Stripe webhook retries and logging', lastActive: Date.now() - 26 * 3600 * 1000 }
+          ]
+        : []
+  });
+  brain.needs.set('shop-app', [
+    { ask: 'Log in to Vercel in the Chrome window, or run ! vercel login', session: 'api-rate-limits', kind: 'login', blocks: 'checking the production env values' },
+    { ask: 'Choose the free-shipping threshold: $50 or $75', session: 'cart-redesign', kind: 'decision', blocks: 'the cart banner copy' }
+  ]);
   brain.notes.set('docs-site', [
     { from: 'you', text: '/summary' },
     {
@@ -385,6 +409,9 @@ async function snapshotWindows(dir) {
   pushState();
   await wait(1200);
   await shot('card.png');
+  await pet.webContents.executeJavaScript(`(() => { const d = document.querySelector('.roster-wrap'); d.open = true; document.getElementById('body').scrollTop = 99999; })()`);
+  await wait(600);
+  await shot('sessions.png');
   await pet.webContents.executeJavaScript(`document.querySelector('[data-pid="docs-site"]').click()`);
   await wait(800);
   await shot('summary.png');

@@ -7,6 +7,7 @@ const memory = require('./memory');
 const snapshot = require('./snapshot');
 const planner = require('./planner');
 const summary = require('./summary');
+const roster = require('./roster');
 const usage = require('./usage');
 const { riskOf } = require('./risk');
 const { log } = require('./log');
@@ -15,10 +16,12 @@ const CARD_FRESH_MS = 10 * 60 * 1000; // a pending card younger than this isn't 
 const AUTO_PER_HOUR = 12; // runaway guard for auto mode, per project
 
 class Brain extends EventEmitter {
-  constructor(watcher, dispatcher) {
+  constructor(watcher, dispatcher, { closer, opener } = {}) {
     super();
     this.watcher = watcher;
     this.dispatcher = dispatcher; // (project, actions, opts) => results
+    this.closer = closer || (async () => ({}));
+    this.opener = opener || (async () => ({ where: 'nowhere' }));
     this.cards = new Map(); // project id -> card
     this.planning = new Set(); // project ids with a planner run in flight
     this.again = new Map(); // project id -> reason, when a trigger arrived mid-plan
@@ -27,13 +30,38 @@ class Brain extends EventEmitter {
     this.errors = new Map(); // project id -> last error message
     this.notes = new Map(); // project id -> [{ from, text }]: /summary results and chat without a card
     this.summarizing = new Set();
+    this.needs = new Map(); // project id -> the latest needs_you list from the planner
+    this.closing = new Set(); // pids being closed
+    this.rosterTimer = null;
 
     watcher.on('idle', (pid, s) => this.onIdle(pid, s));
-    watcher.on('change', () => this.emitState());
+    watcher.on('change', () => {
+      this.emitState();
+      clearTimeout(this.rosterTimer);
+      this.rosterTimer = setTimeout(() => this.labelSessions(), 10 * 1000);
+    });
   }
 
   sessions(pid) {
     return this.watcher.list()[pid] || [];
+  }
+
+  // The sessions null may plan for and send to: not paused, with their purpose attached.
+  workable(pid) {
+    return this.sessions(pid)
+      .filter((s) => !roster.isPaused(pid, s.sessionId))
+      .map((s) => ({ ...s, purpose: roster.purposeOf(pid, s.sessionId) }));
+  }
+
+  // Writes the one-line purpose of new or much-changed sessions (one short run per project).
+  async labelSessions() {
+    for (const p of settings.read().projects.filter((x) => x.enabled !== false)) {
+      try {
+        if (await roster.refresh(p, this.sessions(p.id))) this.emitState();
+      } catch (e) {
+        log('labels failed', p.id, e.message);
+      }
+    }
   }
 
   state() {
@@ -51,10 +79,22 @@ class Brain extends EventEmitter {
         summarizing: this.summarizing.has(p.id),
         notes: (this.notes.get(p.id) || []).slice(-6),
         error: this.errors.get(p.id) || null,
-        sessions: (by[p.id] || []).map((x) => ({ name: x.name, status: x.status }))
+        sessions: (by[p.id] || []).map((x) => ({ name: x.name, status: x.status })),
+        roster: this.rosterView(p, by[p.id] || []),
+        closing: [...this.closing],
+        needs: this.needs.get(p.id) || []
       })),
       cards: [...this.cards.values()]
     };
+  }
+
+  rosterView(p, live) {
+    try {
+      return roster.view(p, live);
+    } catch (e) {
+      log('roster failed', p.id, e.message);
+      return { open: live.map((s) => ({ pid: s.pid, sessionId: s.sessionId, name: s.name, status: s.status })), closed: [] };
+    }
   }
 
   emitState() {
@@ -64,6 +104,7 @@ class Brain extends EventEmitter {
   onIdle(pid, session) {
     const p = settings.project(pid);
     if (!p || p.enabled === false || settings.read().paused) return;
+    if (roster.isPaused(pid, session.sessionId)) return;
     clearTimeout(this.debounce.get(pid));
     const wait = (settings.read().idle_debounce_s || 20) * 1000;
     this.debounce.set(
@@ -93,7 +134,7 @@ class Brain extends EventEmitter {
     this.emit('thinking', true);
     this.emitState();
     try {
-      const sessions = this.sessions(pid);
+      const sessions = this.workable(pid);
       const snap = await snapshot.build(p, sessions);
       const s = settings.read();
       const { rec, session } = await planner.recommend(p, snap, sessions, { reason, usage: usage.summary(), maxBusy: s.max_busy_per_project });
@@ -116,7 +157,7 @@ class Brain extends EventEmitter {
 
   // Turn the planner's answer into a card, checking every target against the live sessions.
   normalize(p, rec) {
-    const sessions = this.sessions(p.id);
+    const sessions = this.workable(p.id);
     const idle = new Set(sessions.filter((s) => s.status === 'idle').map((s) => s.name));
     const used = new Set();
     return (rec.actions || []).map((a) => {
@@ -148,6 +189,7 @@ class Brain extends EventEmitter {
 
   async accept(p, rec, plannerSession, { reason, chat = [] }) {
     if (rec.memory_update) memory.writeMemory(p.id, rec.memory_update);
+    if (Array.isArray(rec.needs_you)) this.needs.set(p.id, rec.needs_you.filter((n) => n && n.ask));
     const actions = this.normalize(p, rec);
     memory.addHistory(p.id, { event: 'recommended', title: actions.map((a) => a.title).join(' | ') || '(nothing)', note: rec.status });
     let pending = actions;
@@ -159,7 +201,7 @@ class Brain extends EventEmitter {
         await this.run(p, safe, { auto: true });
       }
     }
-    if (!pending.length && !rec.reply) {
+    if (!pending.length && !rec.reply && !(this.needs.get(p.id) || []).length) {
       this.cards.delete(p.id);
       if (!actions.length) this.emit('toast', { project: p.id, text: `${p.name}: ${rec.status || 'nothing to do right now.'}` });
       return;
@@ -181,8 +223,8 @@ class Brain extends EventEmitter {
   }
 
   async run(p, actions, { auto }) {
-    // Last check: a target that went busy since planning gets another idle session or a new tab.
-    const sessions = this.sessions(p.id);
+    // Last check: a target that went busy (or was paused) since planning gets another idle session or a new tab.
+    const sessions = this.workable(p.id);
     const idle = sessions.filter((s) => s.status === 'idle').map((s) => s.name);
     const taken = new Set();
     for (const a of actions) {
@@ -283,7 +325,7 @@ class Brain extends EventEmitter {
     this.emit('thinking', true);
     this.emitState();
     try {
-      const idle = this.sessions(p.id).filter((s) => s.status === 'idle').map((s) => s.name);
+      const idle = this.workable(p.id).filter((s) => s.status === 'idle').map((s) => s.name);
       const { rec, session } = await planner.followUp(p, card.plannerSession, text, { idle, maxBusy: settings.read().max_busy_per_project });
       this.cards.delete(p.id);
       await this.accept(p, rec, session, { reason: card.reason, chat: card.chat });
@@ -295,6 +337,55 @@ class Brain extends EventEmitter {
       this.emit('thinking', this.planning.size > 0);
       this.emitState();
     }
+  }
+
+  liveSession(pid) {
+    for (const [projectId, list] of Object.entries(this.watcher.list())) {
+      const s = list.find((x) => x.pid === pid);
+      if (s) return { projectId, s };
+    }
+    return null;
+  }
+
+  // Ends an idle session (it can be reopened). Never one that is working.
+  async closeSession(pid) {
+    const hit = this.liveSession(Number(pid));
+    if (!hit) return { ok: false, text: 'That session is already gone.' };
+    if (hit.s.status !== 'idle') return { ok: false, text: `${hit.s.name} is working; close it when it's idle.` };
+    this.closing.add(hit.s.pid);
+    this.emitState();
+    try {
+      const r = await this.closer(hit.s);
+      memory.addHistory(hit.projectId, { event: 'closed', title: hit.s.name });
+      return { ok: true, text: `Closed ${hit.s.name}${r && r.tab ? ' and its tab' : ''}. Open it again any time.` };
+    } catch (e) {
+      return { ok: false, text: `Couldn't close ${hit.s.name}: ${e.message}` };
+    } finally {
+      this.closing.delete(hit.s.pid);
+      this.emitState();
+    }
+  }
+
+  async openSession(projectId, sessionId) {
+    const p = settings.project(projectId);
+    if (!p) return { ok: false, text: 'Unknown project.' };
+    const c = roster.closedSessions(p, this.sessions(projectId)).find((x) => x.sessionId === sessionId);
+    if (!c) return { ok: false, text: 'That session is open already, or too old to reopen here.' };
+    try {
+      const r = await this.opener(c);
+      memory.addHistory(projectId, { event: 'reopened', title: c.name });
+      return { ok: true, text: `Reopened ${c.name} in ${r.where}.` };
+    } catch (e) {
+      return { ok: false, text: `Couldn't reopen ${c.name}: ${e.message}` };
+    }
+  }
+
+  pauseSession(projectId, sessionId, paused) {
+    if (!settings.project(projectId) || !sessionId) return { ok: false, text: 'Unknown session.' };
+    roster.setPaused(projectId, sessionId, paused);
+    memory.addHistory(projectId, { event: paused ? 'paused' : 'resumed', title: sessionId.slice(0, 8) });
+    this.emitState();
+    return { ok: true, text: paused ? 'Paused: null will send it nothing until you resume it.' : 'Resumed: null can give it work again.' };
   }
 
   dismiss(cardId) {

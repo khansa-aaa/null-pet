@@ -17,7 +17,7 @@ const arg = process.argv[2] || 'null';
 
 if (arg === '--reset') {
   fs.rmSync(CUSTOM, { recursive: true, force: true });
-  console.log('Back to the built-in sprite. Restart null to see it.');
+  console.log('Back to the built-in sprite. If null is running, quit and start it again to see it.');
   process.exit(0);
 }
 
@@ -73,4 +73,4 @@ try {
 } catch (_) {
   console.log('Could not make the tray icon (sips failed); the built-in tray icon stays.');
 }
-console.log('Restart null to see it.');
+console.log('Start null (or, if it is already running, quit and start it again) to see it.');

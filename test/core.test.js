@@ -269,3 +269,78 @@ test('recommendations ask for short What and Why bullets', () => {
   assert.equal(a.properties.why.type, 'array');
   assert.ok(a.required.includes('what') && a.required.includes('why'));
 });
+
+test('the roster lists open and recently closed sessions with purposes, and remembers pauses', async () => {
+  const roster = require('../src/roster');
+  const { TRANSCRIPTS_DIR } = require('../src/paths');
+  const root = '/Users/dev/code/roster-app';
+  const project = { id: 'roster-app', name: 'roster-app', root };
+  const slug = root.replace(/[^a-zA-Z0-9]/g, '-');
+  fs.mkdirSync(path.join(TRANSCRIPTS_DIR, slug), { recursive: true });
+  const tr = (cwd, prompt, reply) =>
+    [
+      { type: 'ai-title', aiTitle: prompt.slice(0, 20), cwd },
+      { type: 'user', cwd, timestamp: new Date().toISOString(), message: { content: prompt } },
+      { type: 'assistant', cwd, timestamp: new Date().toISOString(), message: { content: [{ type: 'text', text: reply }] } }
+    ].map((r) => JSON.stringify(r)).join('\n');
+  fs.writeFileSync(path.join(TRANSCRIPTS_DIR, slug, 'aaaaaaaa-live.jsonl'), tr(root, 'fix the checkout tests', 'done'));
+  fs.writeFileSync(path.join(TRANSCRIPTS_DIR, slug, 'bbbbbbbb-gone.jsonl'), tr(`${root}/web`, 'draft the onboarding emails', 'drafted 5'));
+  fs.mkdirSync(path.join(TRANSCRIPTS_DIR, `${slug}-old`), { recursive: true });
+  fs.writeFileSync(path.join(TRANSCRIPTS_DIR, `${slug}-old`, 'cccccccc-other.jsonl'), tr(`${root}-old`, 'not this project', 'x'));
+  const live = [{ pid: 11, sessionId: 'aaaaaaaa-live', name: 'checkout', cwd: root, status: 'idle' }];
+
+  let v = roster.view(project, live);
+  assert.deepEqual(v.open.map((s) => s.name), ['checkout']);
+  assert.deepEqual(v.closed.map((c) => c.sessionId), ['bbbbbbbb-gone']);
+  assert.equal(v.closed[0].cwd, `${root}/web`);
+
+  let asked = '';
+  const fake = async (_args, input) => {
+    asked = input;
+    return { structured_output: { items: [{ id: '1', purpose: 'Checkout tests and payment bugs' }, { id: '2', purpose: 'Onboarding email drafts' }] } };
+  };
+  assert.equal(await roster.refresh(project, live, { run: fake }), true);
+  assert.match(asked, /fix the checkout tests/);
+  assert.doesNotMatch(asked, /not this project/);
+  assert.equal(await roster.refresh(project, live, { run: fake }), false); // throttled, and nothing is stale
+  v = roster.view(project, live);
+  assert.equal(v.open[0].purpose, 'Checkout tests and payment bugs');
+  assert.equal(v.closed[0].purpose, 'Onboarding email drafts');
+
+  roster.setPaused('roster-app', 'aaaaaaaa-live', true);
+  assert.equal(roster.isPaused('roster-app', 'aaaaaaaa-live'), true);
+  assert.equal(roster.view(project, live).open[0].paused, true);
+  roster.setPaused('roster-app', 'aaaaaaaa-live', false);
+});
+
+test('paused sessions get no work; a busy session is never closed; open asks are kept on the card', async () => {
+  const roster = require('../src/roster');
+  const fake = new (require('events'))();
+  fake.list = () => ({
+    'shop-app': [
+      { pid: 1, sessionId: 's-a', name: 'a', status: 'idle' },
+      { pid: 2, sessionId: 's-b', name: 'b', status: 'idle' },
+      { pid: 3, sessionId: 's-c', name: 'c', status: 'busy' }
+    ],
+    'docs-site': []
+  });
+  const closed = [];
+  const brain = new Brain(fake, async () => [], { closer: async (s) => (closed.push(s.pid), { tab: true }) });
+  roster.setPaused('shop-app', 's-a', true);
+  const p = settings.project('shop-app');
+  const acts = brain.normalize(p, { actions: [{ title: 't', prompt: 'p', target_kind: 'existing', target_session: 'a', risky: false }] });
+  assert.equal(acts[0].target_session, 'b'); // moved off the paused session
+  assert.deepEqual(brain.workable('shop-app').map((s) => s.name), ['b', 'c']);
+  roster.setPaused('shop-app', 's-a', false);
+
+  assert.equal((await brain.closeSession(3)).ok, false);
+  assert.equal((await brain.closeSession(2)).ok, true);
+  assert.deepEqual(closed, [2]);
+
+  settings.update((s) => (s.mode = 'manual'));
+  await brain.accept(p, { status: 's', reply: '', memory_update: '', actions: [], needs_you: [{ ask: 'Log in to Vercel', session: 'b', kind: 'login', blocks: 'env check' }] }, 'x', { reason: 'r' });
+  assert.ok(brain.cards.get('shop-app'), 'a card stays up for open asks even with no actions');
+  assert.equal(brain.state().projects.find((x) => x.id === 'shop-app').needs[0].kind, 'login');
+  const { SCHEMA } = require('../src/planner');
+  assert.ok(SCHEMA.required.includes('needs_you'));
+});

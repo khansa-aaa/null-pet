@@ -11,7 +11,9 @@ Most of a weekly Claude allowance goes unused because sessions sit idle after th
 
 ## What it does
 
-- **Watches your sessions.** It knows every Claude Code session open in each project folder you add, and whether each is busy or idle.
+- **Watches your sessions.** It knows every Claude Code session in each project folder you add, open or recently closed, whether each is busy or idle, and what each one is for.
+- **Close, Open, Pause.** Close an idle session (its tab too), reopen a closed one with its history, or pause one so null sends it nothing.
+- **Shows what needs you.** Logins, decisions and questions that sessions are waiting on are listed at the top of the card, with the session that asked.
 - **Recommends the next step.** When a session finishes, null looks at git, the project's docs and what each session last did, then proposes up to three actions. Each has short **What** and **Why** bullets and the full prompt it would send.
 - **Three choices per card.** Approve (all or some), Reject (with a reason, and null proposes something else), or chat about it.
 - **Uses the sessions you already have.** Work goes to idle sessions first, so they keep their context. null opens a new Terminal tab only when no idle session fits.
@@ -60,7 +62,11 @@ cd null-pet
 npm install
 ```
 
-### 2. Start
+### 2. Optional: choose the sprite
+
+null ships with its own pixel-art pet. To use a different one, see [The sprite](#the-sprite); do it now, before the first start, and null shows it from the first launch.
+
+### 3. Start
 
 ```sh
 npm start
@@ -72,7 +78,7 @@ The pet appears in the bottom-right corner of your screen, and a small icon appe
 nohup npm start >/dev/null 2>&1 &
 ```
 
-### 3. Add a project
+### 4. Add a project
 
 Click the pet. The first time, the card has one button:
 
@@ -80,7 +86,7 @@ Click the pet. The first time, the card has one button:
 
 Choose the folder of a project you run Claude Code in. Sessions started in that folder or any folder inside it count as that project's. Add more from the menu: right-click the pet, then **Projects › Add project folder…**
 
-### 4. Open Claude Code sessions as usual
+### 5. Open Claude Code sessions as usual
 
 Start `claude` in the project folder in as many Terminal tabs as you like. null picks them up within a few seconds. Naming them helps you read the cards:
 
@@ -88,7 +94,7 @@ Start `claude` in the project folder in as many Terminal tabs as you like. null 
 claude -n checkout-tests
 ```
 
-### 5. Decide on the first card
+### 6. Decide on the first card
 
 null plans once when a project is added and again each time one of its sessions finishes a turn. Planning takes one to four minutes; the pet shows a thinking animation meanwhile. Then the card opens:
 
@@ -102,7 +108,7 @@ null plans once when a project is added and again each time one of its sessions 
 
 To ask for a plan at any time, use **Recommend now** on the card or in the menu.
 
-### 6. Optional: turn on auto mode
+### 7. Optional: turn on auto mode
 
 Use the **Manual / Auto** switch at the top of the card.
 
@@ -111,7 +117,7 @@ Use the **Manual / Auto** switch at the top of the card.
 
 Auto mode stops by itself when you are rate limited, when the week's allowance passes 95% (`week_cap`), or after 12 sends for one project in an hour.
 
-### 7. Optional: start at login
+### 8. Optional: start at login
 
 Right-click the pet and tick **Start null at login**.
 
@@ -126,6 +132,22 @@ Right-click the pet and tick **Start null at login**.
 | Ask for something specific | Type it in the chat box; null plans around it |
 | Pause everything | Menu › **Pause null** |
 | Stop watching a project | Menu › **Projects** › the project › untick **Watch this project** |
+
+### Sessions
+
+Open **Sessions** at the bottom of a card (it is always shown when no card is waiting). Each session has a one-line purpose that null writes from its prompts, and three controls:
+
+<img src="docs/sessions.png" alt="The sessions list: open sessions with Pause and Close, a paused one with Resume, and recently closed ones with Open" width="380">
+
+| Button | What it does |
+| --- | --- |
+| **Close** | Ends an idle session and closes its Terminal tab. Its history stays on disk. Not offered while a session is working |
+| **Open** | Reopens a session closed in the last 7 days, in a new Terminal tab, with its history (`claude --resume`) |
+| **Pause** / **Resume** | A paused session stays open, but null plans nothing for it and sends it nothing |
+
+### Needs you
+
+Sessions often finish a task by asking you for something: a login, a decision, an answer, a purchase. Those asks appear at the top of the card, each with the session that asked and what stays stuck until you act. To answer one, do it (log in, run the command), or type your answer in the chat box and null passes it on in its next plan.
 
 ### `/summary`
 
@@ -176,6 +198,7 @@ Everything is local, under `~/Library/Application Support/null-pet/`:
 | `null.log` | What null did, and which model each run used |
 | `projects/<id>/memory.md` | That project's goals, decisions and rejected ideas |
 | `projects/<id>/history.jsonl` | Recommendations, sends and decisions |
+| `projects/<id>/roster.json` | Session names, purposes and which are paused |
 | `projects/<id>/prompts/` | Prompts given to new sessions |
 
 **Privacy.** null has no server and sends nothing anywhere itself. To plan, it gives Claude Code a brief of the project: branch, changed file names, recent commit subjects, doc headings, and the last prompt and reply of each session in that project. The planner can also read files in the project folder. That goes to Anthropic through your own Claude Code login, like any other Claude Code run.
@@ -186,7 +209,7 @@ The built-in sprite is original pixel art, generated by [`scripts/make-sprite.js
 
 <img src="docs/sprite-idle.png" alt="The idle frames of the built-in sprite" width="384">
 
-The sheet uses the Codex pet layout (8 columns by 11 rows of 192×208 frames), so any sheet in that layout works. Put yours at `assets/custom/sprite.webp` or `assets/custom/sprite.png`; that folder is ignored by git.
+The sheet uses the Codex pet layout (8 columns by 11 rows of 192×208 frames), so any sheet in that layout works. Put yours at `assets/custom/sprite.webp` or `assets/custom/sprite.png` (create the `custom` folder first); that folder is ignored by git. A 64×64 `assets/custom/tray.png` replaces the menu-bar icon too. null picks the sprite up when it starts, so if null is already running, quit it and start it again.
 
 If you have the ChatGPT or Codex desktop app installed, you can use one of its pets, such as the original "null", on your own Mac:
 
@@ -195,6 +218,8 @@ npm run sprite:codex              # the "null" pet
 npm run sprite:codex -- --list    # see which pets your app has
 npm run sprite:default            # back to the built-in sprite
 ```
+
+These need the ChatGPT desktop app for Mac (a free download from openai.com) installed; signing in isn't needed.
 
 That art belongs to OpenAI. The script copies it from your own installation and it is not part of this repository.
 
@@ -226,6 +251,7 @@ npm test    # unit tests (node --test)
 | `src/risk.js` | Which actions always ask |
 | `src/memory.js` | Per-project memory and history |
 | `src/summary.js` | `/summary` |
+| `src/roster.js` | Open and closed sessions, their purposes, pausing |
 | `src/usage.js` | Usage meters |
 | `ui/` | The pet and the card |
 

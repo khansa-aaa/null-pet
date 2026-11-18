@@ -29,6 +29,13 @@ async function childEnv() {
   const PATH = [await shellPath(), process.env.PATH, ...extra].filter(Boolean).join(path.delimiter);
   const env = { ...process.env, PATH };
   delete env.ELECTRON_RUN_AS_NODE;
+  // If null was started from inside a Claude Code session, it inherited that session's identity
+  // (session id, messaging socket, child-session marker). Runs that kept it would act as that
+  // session's children: no transcript, and messages sent on its behalf. Each run must be its own.
+  delete env.AI_AGENT; // set for commands an agent runs; a session that sees it doesn't register itself
+  for (const k of Object.keys(env)) {
+    if ((k === 'CLAUDECODE' || k === 'CLAUDE_PID' || k === 'CLAUDE_JOB_DIR' || k === 'CLAUDE_EFFORT' || k.startsWith('CLAUDE_CODE_')) && k !== 'CLAUDE_CODE_PLUGIN_DIRS') delete env[k];
+  }
   return env;
 }
 

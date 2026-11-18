@@ -137,15 +137,62 @@ function render() {
   renderUsage();
 }
 
+// Every session in the project: what it's for, and Close / Open / Pause.
 function sessionsHtml(p) {
-  if (!p.sessions.length) return '<p class="empty">No Claude Code sessions open in this project.</p>';
-  return `<ul class="sessions">${p.sessions.map((s) => `<li><span class="st ${esc(s.status)}"></span>${esc(s.name)} <span class="empty">${esc(s.status)}</span></li>`).join('')}</ul>`;
+  const r = p.roster || { open: [], closed: [] };
+  const closing = new Set(p.closing || []);
+  const purpose = (s) => (s.purpose ? `<div class="purpose">${esc(s.purpose)}</div>` : '<div class="purpose empty">working out what it does…</div>');
+  const open = r.open
+    .map((s) => {
+      const state = closing.has(s.pid) ? 'closing…' : s.paused ? `paused · ${s.status}` : s.status;
+      const close =
+        s.status === 'idle' && !closing.has(s.pid)
+          ? `<button class="mini" data-close="${s.pid}" title="End this session and close its tab. You can open it again.">Close</button>`
+          : `<button class="mini" disabled title="${s.status === 'idle' ? 'Closing' : 'Working: close it when it is idle'}">Close</button>`;
+      const pause = `<button class="mini${s.paused ? ' on' : ''}" data-pause="${esc(s.sessionId)}" data-paused="${s.paused ? 1 : 0}" title="${
+        s.paused ? 'Let null give it work again' : 'Keep it open, but null sends it nothing'
+      }">${s.paused ? 'Resume' : 'Pause'}</button>`;
+      return `<li class="sess${s.paused ? ' paused' : ''}"><span class="st ${esc(s.status)}"></span><div class="who"><div class="nm">${esc(s.name)} <span class="empty">${esc(state)}</span></div>${purpose(s)}</div><div class="ctl">${pause}${close}</div></li>`;
+    })
+    .join('');
+  const closed = r.closed
+    .map(
+      (c) =>
+        `<li class="sess closed"><span class="st"></span><div class="who"><div class="nm">${esc(c.name)} <span class="empty">closed ${esc(ago(c.lastActive))}</span></div>${purpose(c)}</div><div class="ctl"><button class="mini" data-open="${esc(c.sessionId)}" title="Reopen it in a new Terminal tab, with its history">Open</button></div></li>`
+    )
+    .join('');
+  return `<div class="roster">
+    <div class="sec">Open sessions (${r.open.length})</div>
+    ${r.open.length ? `<ul class="sessions">${open}</ul>` : '<p class="empty">None open in this project.</p>'}
+    ${r.closed.length ? `<div class="sec">Closed recently (${r.closed.length})</div><ul class="sessions">${closed}</ul>` : ''}
+  </div>`;
+}
+
+function ago(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 60) return `${Math.max(1, m)}m ago`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}
+
+// Things only the user can do, gathered from the sessions' replies.
+function needsHtml(p) {
+  const list = p.needs || [];
+  if (!list.length) return '';
+  const icon = { login: 'Log in', decision: 'Decide', answer: 'Answer', purchase: 'Buy', approval: 'Approve', other: 'Do' };
+  return `<div class="needs"><div class="sec warn">Needs you (${list.length})</div><ul>${list
+    .map(
+      (n) =>
+        `<li><span class="kind">${esc(icon[n.kind] || 'Do')}</span><div><div>${esc(n.ask)}</div><div class="purpose">${n.session ? `${esc(n.session)} · ` : ''}blocks: ${esc(n.blocks || '')}</div></div></li>`
+    )
+    .join('')}</ul></div>`;
 }
 
 function overviewHtml(p) {
   return `
     ${p.planning ? '<div class="thinking">null is reading the project and planning…</div>' : '<div class="status">Nothing waiting. I\'ll pop up when a session finishes.</div>'}
     ${p.error ? `<div class="error">Last plan failed: ${esc(p.error)}</div>` : ''}
+    ${needsHtml(p)}
     ${sessionsHtml(p)}
     ${notesHtml(p)}
     <div><button class="btn" data-recommend="${esc(p.id)}" ${p.planning ? 'disabled' : ''}>Recommend now</button></div>`;
@@ -186,10 +233,12 @@ function cardHtml(card, p) {
   return `
     <div class="status">${esc(card.status)}</div>
     <div class="reason">${esc(card.reason || '')}</div>
+    ${needsHtml(p)}
     ${card.actions.length ? `<ul class="actions">${actions}</ul>` : '<p class="empty">No actions proposed.</p>'}
     ${chat}
     ${card.busy || p.planning ? '<div class="thinking">working on it…</div>' : ''}
-    ${notesHtml(p)}`;
+    ${notesHtml(p)}
+    <details class="roster-wrap"${openRoster ? ' open' : ''}><summary>Sessions</summary>${sessionsHtml(p)}</details>`;
 }
 
 function renderUsage() {
@@ -231,12 +280,13 @@ api.on('null:open', (v) => {
   if (v) refresh();
 });
 let toastTimer = null;
-api.on('null:toast', (t) => {
-  $('toast').textContent = t.text;
+function showToast(text) {
+  $('toast').textContent = text;
   $('toast').hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => ($('toast').hidden = true), 12000);
-});
+}
+api.on('null:toast', (t) => showToast(t.text));
 
 // ---------- card events ----------
 $('close').addEventListener('click', () => api.close());
@@ -248,8 +298,17 @@ $('tabs').addEventListener('click', (e) => {
   selected = b.dataset.pid;
   render();
 });
+let openRoster = false;
+$('body').addEventListener('toggle', (e) => e.target.classList && e.target.classList.contains('roster-wrap') && (openRoster = e.target.open), true);
+const say = (r) => r && r.text && showToast(r.text);
 $('body').addEventListener('click', (e) => {
   if (e.target.closest('[data-add]')) return api.addProject();
+  const c = e.target.closest('[data-close]');
+  if (c) return api.closeSession(Number(c.dataset.close)).then(say);
+  const o = e.target.closest('[data-open]');
+  if (o) return api.openSession(selected, o.dataset.open).then(say);
+  const pz = e.target.closest('[data-pause]');
+  if (pz) return api.pauseSession(selected, pz.dataset.pause, pz.dataset.paused !== '1').then(say);
   const r = e.target.closest('[data-recommend]');
   if (r) api.recommend(r.dataset.recommend);
 });
