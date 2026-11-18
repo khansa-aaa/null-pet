@@ -126,6 +126,7 @@ Right-click the pet and tick **Start null at login**.
 | Action | How |
 | --- | --- |
 | Open or close the card | Click the pet |
+| Bigger or smaller card | The ⤢ button at the top of the card (it remembers your choice) |
 | Move the pet | Drag it |
 | Menu | Right-click the pet, or click the menu bar icon |
 | Summary of changes | Type `/summary` in the chat box |

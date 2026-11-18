@@ -290,6 +290,15 @@ api.on('null:toast', (t) => showToast(t.text));
 
 // ---------- card events ----------
 $('close').addEventListener('click', () => api.close());
+let large = false;
+$('expand').addEventListener('click', () => api.setLarge(!large));
+api.on('null:large', (on) => {
+  large = !!on;
+  $('expand').textContent = large ? '⤡' : '⤢';
+  $('expand').title = large ? 'Smaller card' : 'Bigger card';
+  $('expand').setAttribute('aria-label', large ? 'Shrink the card' : 'Expand the card');
+  $('expand').setAttribute('aria-pressed', String(large));
+});
 $('mode-manual').addEventListener('click', () => api.setMode('manual'));
 $('mode-auto').addEventListener('click', () => api.setMode('auto'));
 $('tabs').addEventListener('click', (e) => {

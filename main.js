@@ -13,6 +13,7 @@ const { log } = require('./src/log');
 
 const COLLAPSED = { w: 90, h: 90 };
 const EXPANDED = { w: 400, h: 600 };
+const LARGE = { w: 600, h: 860 }; // the card's expand button; never more than the screen allows
 const SPRITE = { w: 67.2, h: 72.8, right: 6, bottom: 2 };
 
 let pet = null;
@@ -58,12 +59,23 @@ function place(w, h) {
   const y = Math.max(anchor.bottom - h, wa.y);
   pet.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(w), height: Math.round(h) });
 }
+function cardSize() {
+  if (!settings.read().card_large) return EXPANDED;
+  const wa = screen.getDisplayNearestPoint({ x: anchor.right - 20, y: anchor.bottom - 20 }).workArea;
+  return { w: Math.max(EXPANDED.w, Math.min(LARGE.w, wa.width - 16)), h: Math.max(EXPANDED.h, Math.min(LARGE.h, wa.height - 16)) };
+}
 function setOpen(v) {
   open = v;
-  const size = v ? EXPANDED : COLLAPSED;
+  const size = v ? cardSize() : COLLAPSED;
   place(size.w, size.h);
   send('null:open', v);
+  send('null:large', !!settings.read().card_large);
   refreshTray();
+}
+function setLarge(on) {
+  settings.update((s) => (s.card_large = !!on));
+  if (open) setOpen(true);
+  else send('null:large', !!on);
 }
 
 function createPet() {
@@ -253,6 +265,7 @@ usage.onChange(pushState);
 ipcMain.handle('null:state', () => brain.state());
 ipcMain.on('null:toggle', () => setOpen(!open));
 ipcMain.on('null:close', () => setOpen(false));
+ipcMain.on('null:large', (_e, on) => setLarge(on));
 ipcMain.on('null:mode', (_e, mode) => setMode(mode === 'auto' ? 'auto' : 'manual'));
 ipcMain.handle('null:approve', (_e, cardId, actionIds) => brain.approve(cardId, actionIds));
 ipcMain.handle('null:reject', (_e, cardId, why) => brain.reject(cardId, why));
@@ -409,6 +422,11 @@ async function snapshotWindows(dir) {
   await pet.webContents.executeJavaScript(`(() => { const d = document.querySelector('.roster-wrap'); d.open = true; document.getElementById('body').scrollTop = 99999; })()`);
   await wait(600);
   await shot('sessions.png');
+  setLarge(true);
+  await wait(900);
+  await shot('large.png');
+  setLarge(false);
+  await wait(500);
   await pet.webContents.executeJavaScript(`document.querySelector('[data-pid="docs-site"]').click()`);
   await wait(800);
   await shot('summary.png');

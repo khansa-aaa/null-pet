@@ -12,6 +12,7 @@ const DEFAULTS = {
   max_busy_per_project: 4, // null won't start new sessions past this many busy ones in a project
   week_cap: 0.95, // auto mode stops dispatching once the 7-day window passes this utilization
   courier_permission_mode: 'auto', // the permission mode your own sessions run in; a mismatch makes them hold null's messages for approval
+  card_large: false, // the card's expand button
   anchor: null
 };
 

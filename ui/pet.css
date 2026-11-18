@@ -124,3 +124,4 @@ textarea:focus { border-color: var(--red); }
 .needs .kind { flex: none; font: 600 10px var(--mono); color: var(--warn); border: 1px solid rgba(255, 176, 32, .5); border-radius: 5px; padding: 1px 5px; margin-top: 1px; }
 .roster-wrap summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
 .sessions { grid-template-columns: minmax(0, 1fr); }
+#expand { font-size: 16px; }
