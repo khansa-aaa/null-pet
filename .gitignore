@@ -1,0 +1,5 @@
+node_modules/
+# your own sprite (see scripts/use-codex-pet.js); never committed
+assets/custom/
+.DS_Store
+*.log

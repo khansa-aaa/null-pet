@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
+  <title>null</title>
+  <link rel="stylesheet" href="pet.css">
+</head>
+<body>
+  <section class="card" id="card" hidden aria-label="null">
+    <header class="head">
+      <div class="brand"><span class="logo">∅</span> null</div>
+      <div class="mode" role="radiogroup" aria-label="Mode">
+        <button class="seg" id="mode-manual" role="radio" aria-checked="true" title="Ask me before running anything">Manual</button>
+        <button class="seg" id="mode-auto" role="radio" aria-checked="false" title="Run safe actions without asking; risky ones still ask">Auto</button>
+      </div>
+      <button class="icon-btn" id="close" aria-label="Close">×</button>
+    </header>
+    <nav class="tabs" id="tabs" role="tablist"></nav>
+    <main class="body" id="body"></main>
+    <div class="toast" id="toast" hidden role="status"></div>
+    <footer class="foot" id="foot" hidden>
+      <div class="chat-row">
+        <textarea id="chat-input" rows="1" placeholder="Ask null something, or /summary"></textarea>
+        <button class="btn ghost" id="chat-send" title="Send (Enter)">Chat</button>
+      </div>
+      <div class="decide" id="decide">
+        <button class="btn reject" id="reject">Reject</button>
+        <button class="btn approve" id="approve">Approve</button>
+      </div>
+    </footer>
+    <div class="usage" id="usage"></div>
+  </section>
+
+  <div class="pet" id="pet" tabindex="0" role="button" aria-label="null: click to open, right-click for the menu">
+    <div class="sprite" id="sprite"></div>
+    <span class="badge" id="badge" hidden></span>
+  </div>
+  <script src="pet.js"></script>
+</body>
+</html>

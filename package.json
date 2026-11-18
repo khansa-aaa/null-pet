@@ -1,0 +1,25 @@
+{
+  "name": "null-pet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "null, a desktop pet that keeps Claude Code busy: it watches the sessions on your projects and recommends (or runs) the next step whenever one goes idle.",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "sprite:build": "node scripts/make-sprite.js",
+    "sprite:codex": "node scripts/use-codex-pet.js",
+    "sprite:default": "node scripts/use-codex-pet.js --reset"
+  },
+  "devDependencies": {
+    "electron": "33.4.11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/khansa-aaa/null-pet.git"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
