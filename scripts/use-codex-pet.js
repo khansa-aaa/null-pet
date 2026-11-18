@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-// Optional: use one of the pets that ships inside your own copy of the ChatGPT / Codex desktop app
-// (for example "null") instead of null's built-in sprite. The art belongs to OpenAI, so it is not in
-// this repository: this copies it from the app on YOUR Mac into assets/custom/, which git ignores.
+// Switches null to another pet that ships inside the ChatGPT / Codex desktop app on this Mac, by
+// copying its sheet into assets/custom/ (the art belongs to OpenAI).
 //
 //   npm run sprite:codex            # the "null" pet
 //   npm run sprite:codex -- --list  # show the pets your app has
 //   npm run sprite:codex -- hoots   # another one
-//   npm run sprite:default          # back to the built-in sprite
+//   npm run sprite:default          # no custom sprite: the plain fallback pet
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');

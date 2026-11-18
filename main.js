@@ -25,13 +25,10 @@ let open = false;
 if (process.env.NULL_PET_SNAPSHOT) app.setPath('userData', path.join(process.env.NULL_PET_SNAPSHOT, 'profile'));
 if (!app.requestSingleInstanceLock()) app.quit();
 
-// The built-in sprite, or your own in assets/custom/ (see scripts/use-codex-pet.js). Screenshots
-// for the docs always use the built-in one.
+// The sprite in assets/custom/ (the Codex "null" pet), or the plain fallback pet when it's missing.
 const CUSTOM = path.join(__dirname, 'assets', 'custom');
 function asset(names) {
-  if (!process.env.NULL_PET_SNAPSHOT) {
-    for (const n of names) if (fs.existsSync(path.join(CUSTOM, n))) return path.join(CUSTOM, n);
-  }
+  for (const n of names) if (fs.existsSync(path.join(CUSTOM, n))) return path.join(CUSTOM, n);
   return path.join(__dirname, 'assets', names[names.length - 1]);
 }
 
